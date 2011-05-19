@@ -1,0 +1,171 @@
+#!/bin/sh
+
+##############################################################################
+# The command to securely remove a file.
+SECURE_RM="rm --"		# not secure on unencrypted disks
+#SECURE_RM="wipe -qcf --"	# use the wipe program on Linux
+#SECURE_RM="rm -fP --"		# FreeBSD has a -P option
+##############################################################################
+# PWD_EDITOR specifies the editor command. This process needs to run in
+# the foreground.
+# PWD_EDITOR="$EDITOR"
+# start gvim, but do not create .viminfo, no swap file, in foreground
+PWD_EDITOR="gvim -i NONE -n -f --"
+##############################################################################
+# The user associated with the key to encrypt the passwords.
+GPG_USER=gpgstore
+##############################################################################
+# The commands to encrypt and decrypt. It is unlikely that you need to change
+# these.
+GPG_ENCRYPT="gpg -a -e -s -r $GPG_USER -u $GPG_USER"
+GPG_DECRYPT="gpg"
+##############################################################################
+# The directory where your encrypted passwords will be stored.
+PWDDBDIR="$HOME/.gpgstore"
+
+
+usage() {
+	prog=`basename -- "$0"`
+	cat <<EOF
+Usage:
+	$prog --add identity
+	$prog --edit identity
+	$prog --delete identity
+	$prog --view identity
+	$prog --list
+EOF
+}
+
+encrypt_pwd() {
+	keyid="$1"
+	$GPG_ENCRYPT > "$PWDDBDIR"/"$keyid".pwd
+}
+
+decrypt_pwd() {
+	$GPG_DECRYPT < "$PWDDBDIR"/"$keyid".pwd
+}
+
+create_file() {
+	mktemp
+}
+
+remove_file() {
+	fn="$1"
+	$SECURE_RM "$fn"
+}
+
+launch_editor() {
+	fn="$1"
+	$PWD_EDITOR "$fn" && cat -- "$fn"
+}
+
+check_key_isvalid() {
+	keyid="$1"
+	if [ -z "$keyid" ]
+	then
+		echo "Key is empty. Please specify a non-empty key." >&2
+		exit 1
+	fi
+}
+
+check_key_free() {
+	keyid="$1"
+	if [ -f "$PWDDBDIR"/"$keyid".pwd ]
+	then
+		echo "Key already exists, please use a different key-id." >&2
+		exit 1
+	fi
+}
+
+check_key_exists() {
+	keyid="$1"
+	if [ ! -f "$PWDDBDIR"/"$keyid".pwd ]
+	then
+		echo "Key does not exist, please use a different key-id." >&2
+		exit 1
+	fi
+}
+
+
+add_pwd() {
+	keyid="$1"
+	( tmpfile=`create_file` \
+		&& launch_editor "$tmpfile" \
+		&& remove_file "$tmpfile" ) \
+		| encrypt_pwd "$keyid"
+}
+
+edit_pwd() {
+	keyid="$1"
+	tmpfile=`create_file` \
+		&& ( decrypt_pwd "$keyid" > "$tmpfile" ) \
+		&& ( launch_editor "$tmpfile" && remove_file "$tmpfile") \
+		| encrypt_pwd "$keyid"
+}
+
+del_pwd() {
+	keyid="$1"
+	echo -n "Are you sure you want to delete $keyid? "
+	read answer
+	case "$answer" in
+		[Yy]|[Yy][Ee][Ss])
+			remove_file "$PWDDBDIR"/"$keyid".pwd
+			echo "Info removed."
+			;;
+		*)
+			echo "Info not deleted."
+			;;
+	esac
+}
+
+view_pwd() {
+	keyid="$1"
+	decrypt_pwd "$keyid"
+}
+
+list_pwds() {
+	find -- "$PWDDBDIR" -type f -name '*.pwd' -print0 | xargs -0 -n 1 -I % basename -- % .pwd
+}
+
+if [ ! -d "$PWDDBDIR" ]
+then
+	echo "Storage directory does not exist. Please create it with:" >&2
+	echo "   mkdir \"$PWDDBDIR\"" >&2
+	exit 1
+fi
+
+case "$1" in
+	--add|add)
+		keyid="$2"
+		check_key_isvalid "$keyid"
+		check_key_free "$keyid"
+		add_pwd "$keyid"
+		;;
+	--edit|edit)
+		keyid="$2"
+		check_key_isvalid "$keyid"
+		check_key_exists "$keyid"
+		edit_pwd "$keyid"
+		;;
+	--delete|--del|delete|del)
+		keyid="$2"
+		check_key_isvalid "$keyid"
+		check_key_exists "$keyid"
+		del_pwd "$keyid"
+		;;
+	--view|view)
+		keyid="$2"
+		check_key_isvalid "$keyid"
+		check_key_exists "$keyid"
+		view_pwd "$keyid"
+		;;
+	--list|--ls|list|ls)
+		list_pwds
+		;;
+	*)
+		usage >&2
+		exit 1
+		;;
+esac
+
+
