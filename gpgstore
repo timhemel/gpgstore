@@ -124,7 +124,7 @@ view_pwd() {
 }
 
 list_pwds() {
-	find -- "$PWDDBDIR" -type f -name '*.pwd' -print0 | xargs -0 -n 1 -I % basename -- % .pwd
+	find -- "$PWDDBDIR" -type f -name '*.pwd' -print0 | xargs -0 -n 1 -I % basename -- % .pwd | sort
 }
 
 if [ ! -d "$PWDDBDIR" ]
